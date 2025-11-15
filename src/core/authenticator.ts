@@ -19,7 +19,7 @@ import {
 import { IpValidator } from '../validators/ip-validator';
 import { TotpValidator } from '../validators/totp-validator';
 import { CertificateValidator } from '../validators/certificate-validator';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 
 /**
  * Core authenticator that orchestrates all security layers
@@ -119,7 +119,7 @@ export class QiuthAuthenticator {
   }
 
   /**
-   * Validate API key against stored hash
+   * Validate API key against stored hash using constant-time comparison
    */
   private validateApiKey(apiKey: string, hashedApiKey: string): boolean {
     if (!apiKey) {
@@ -128,7 +128,14 @@ export class QiuthAuthenticator {
 
     // Hash the provided API key
     const hash = this.hashApiKey(apiKey);
-    return hash === hashedApiKey;
+
+    // Use constant-time comparison to prevent timing attacks
+    try {
+      return timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(hashedApiKey, 'hex'));
+    } catch {
+      // If lengths don't match, timingSafeEqual throws
+      return false;
+    }
   }
 
   /**

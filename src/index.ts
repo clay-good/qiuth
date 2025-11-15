@@ -40,14 +40,7 @@ export * from './rotation/credential-rotator';
 export * from './observability/logger';
 export * from './observability/metrics';
 
-// Rotation system will be exported here
-// export * from './rotation/credential-rotator';
-
-// Observability will be exported here
-// export * from './observability/logger';
-// export * from './observability/metrics';
-
 /**
  * Qiuth version
  */
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.2';

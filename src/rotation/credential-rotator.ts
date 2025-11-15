@@ -42,6 +42,13 @@ export interface CredentialRotationConfig {
   autoComplete?: boolean;
 
   /**
+   * Warning threshold in milliseconds before rotation completes
+   * If set, onRotationWarning will be called when this much time remains
+   * @default 3600000 (1 hour)
+   */
+  warningThreshold?: number;
+
+  /**
    * Callback when rotation starts
    */
   onRotationStart?: (oldConfig: QiuthConfig, newConfig: QiuthConfig) => void;
@@ -55,6 +62,11 @@ export interface CredentialRotationConfig {
    * Callback when rotation is revoked
    */
   onRotationRevoke?: (reason: string) => void;
+
+  /**
+   * Callback when approaching rotation completion (based on warningThreshold)
+   */
+  onRotationWarning?: (timeRemaining: number, metadata: CredentialRotationMetadata) => void;
 }
 
 /**
@@ -106,6 +118,8 @@ export class CredentialRotator {
   private config: CredentialRotationConfig;
   private authenticator: QiuthAuthenticator;
   private completionTimer?: NodeJS.Timeout;
+  private warningTimer?: NodeJS.Timeout;
+  private warningTriggered: boolean = false;
 
   /**
    * Create a new credential rotator
@@ -120,6 +134,7 @@ export class CredentialRotator {
     this.config = {
       transitionPeriod: config.transitionPeriod ?? 86400000, // 24 hours
       autoComplete: config.autoComplete ?? true,
+      warningThreshold: config.warningThreshold ?? 3600000, // 1 hour
       ...config,
     };
     this.authenticator = new QiuthAuthenticator();
@@ -160,6 +175,23 @@ export class CredentialRotator {
       this.config.onRotationStart(this.metadata.oldConfig, newConfig);
     }
 
+    // Reset warning flag
+    this.warningTriggered = false;
+
+    // Schedule warning
+    if (this.config.onRotationWarning && this.config.warningThreshold) {
+      const warningTime =
+        (this.config.transitionPeriod || 0) - this.config.warningThreshold;
+      if (warningTime > 0) {
+        this.warningTimer = setTimeout(() => {
+          this.triggerWarning();
+        }, warningTime);
+      } else {
+        // Warning threshold is greater than transition period, trigger immediately
+        this.triggerWarning();
+      }
+    }
+
     // Schedule auto-completion
     if (this.config.autoComplete) {
       this.completionTimer = setTimeout(() => {
@@ -179,10 +211,14 @@ export class CredentialRotator {
       throw new Error('No rotation in progress');
     }
 
-    // Clear timer
+    // Clear timers
     if (this.completionTimer) {
       clearTimeout(this.completionTimer);
       this.completionTimer = undefined;
+    }
+    if (this.warningTimer) {
+      clearTimeout(this.warningTimer);
+      this.warningTimer = undefined;
     }
 
     this.metadata = {
@@ -208,10 +244,14 @@ export class CredentialRotator {
    * @returns Updated rotation metadata
    */
   public revokeCredentials(reason: string): CredentialRotationMetadata {
-    // Clear timer
+    // Clear timers
     if (this.completionTimer) {
       clearTimeout(this.completionTimer);
       this.completionTimer = undefined;
+    }
+    if (this.warningTimer) {
+      clearTimeout(this.warningTimer);
+      this.warningTimer = undefined;
     }
 
     this.metadata = {
@@ -314,10 +354,14 @@ export class CredentialRotator {
       throw new Error('No rotation in progress');
     }
 
-    // Clear timer
+    // Clear timers
     if (this.completionTimer) {
       clearTimeout(this.completionTimer);
       this.completionTimer = undefined;
+    }
+    if (this.warningTimer) {
+      clearTimeout(this.warningTimer);
+      this.warningTimer = undefined;
     }
 
     // Revert to old config
@@ -330,12 +374,49 @@ export class CredentialRotator {
   }
 
   /**
+   * Trigger rotation warning callback
+   * @private
+   */
+  private triggerWarning(): void {
+    if (this.warningTriggered || !this.config.onRotationWarning) {
+      return;
+    }
+
+    this.warningTriggered = true;
+    const timeRemaining = this.getTimeRemaining();
+    this.config.onRotationWarning(timeRemaining, this.getMetadata());
+  }
+
+  /**
+   * Manually check and trigger warning if threshold has been reached
+   * Useful for polling-based monitoring
+   */
+  public checkWarningThreshold(): void {
+    if (
+      this.warningTriggered ||
+      !this.config.onRotationWarning ||
+      !this.config.warningThreshold
+    ) {
+      return;
+    }
+
+    const timeRemaining = this.getTimeRemaining();
+    if (timeRemaining > 0 && timeRemaining <= this.config.warningThreshold) {
+      this.triggerWarning();
+    }
+  }
+
+  /**
    * Clean up resources
    */
   public destroy(): void {
     if (this.completionTimer) {
       clearTimeout(this.completionTimer);
       this.completionTimer = undefined;
+    }
+    if (this.warningTimer) {
+      clearTimeout(this.warningTimer);
+      this.warningTimer = undefined;
     }
   }
 }

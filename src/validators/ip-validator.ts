@@ -20,6 +20,8 @@ import { isIPv4, isIPv6 } from 'node:net';
  */
 export class IpValidator {
   private readonly config: IpAllowlistConfig;
+  private readonly normalizedIpCache: Map<string, string> = new Map();
+  private readonly cidrCache: Map<string, { network: string; prefixLen: number }> = new Map();
 
   /**
    * Create a new IP validator
@@ -33,6 +35,33 @@ export class IpValidator {
       throw new Error('IP allowlist cannot be empty when enabled');
     }
     this.config = config;
+
+    // Pre-cache normalized IPs and CIDR ranges for better performance
+    this.preloadCaches();
+  }
+
+  /**
+   * Pre-load caches with normalized IPs and parsed CIDR ranges
+   * @private
+   */
+  private preloadCaches(): void {
+    for (const entry of this.config.allowedIps) {
+      if (entry.includes('/')) {
+        // Cache CIDR parsing
+        const [network, prefixLenStr] = entry.split('/');
+        if (network && prefixLenStr) {
+          const prefixLen = parseInt(prefixLenStr, 10);
+          if (!isNaN(prefixLen)) {
+            this.cidrCache.set(entry, { network, prefixLen });
+          }
+        }
+      } else {
+        // Cache normalized IP
+        if (this.isValidIp(entry)) {
+          this.normalizedIpCache.set(entry, this.normalizeIp(entry));
+        }
+      }
+    }
   }
 
   /**
@@ -51,14 +80,18 @@ export class IpValidator {
       return false;
     }
 
+    // Normalize client IP once and cache it
+    const normalizedClientIp = this.getCachedNormalizedIp(clientIp);
+
     // Check against allowlist
     return this.config.allowedIps.some((allowedEntry) => {
       if (allowedEntry.includes('/')) {
-        // CIDR notation - check if IP is in range
-        return this.isIpInCidrRange(clientIp, allowedEntry);
+        // CIDR notation - check if IP is in range (uses cached CIDR data)
+        return this.isIpInCidrRangeCached(clientIp, allowedEntry);
       } else {
-        // Exact match
-        return this.normalizeIp(clientIp) === this.normalizeIp(allowedEntry);
+        // Exact match (uses cached normalized IPs)
+        const cachedAllowedIp = this.normalizedIpCache.get(allowedEntry);
+        return normalizedClientIp === cachedAllowedIp;
       }
     });
   }
@@ -102,6 +135,21 @@ export class IpValidator {
    */
   private isValidIp(ip: string): boolean {
     return isIPv4(ip) || isIPv6(ip);
+  }
+
+  /**
+   * Get cached normalized IP or normalize and cache it
+   * @private
+   */
+  private getCachedNormalizedIp(ip: string): string {
+    const cached = this.normalizedIpCache.get(ip);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const normalized = this.normalizeIp(ip);
+    this.normalizedIpCache.set(ip, normalized);
+    return normalized;
   }
 
   /**
@@ -160,6 +208,39 @@ export class IpValidator {
     const middle = Array(missing).fill('0000');
 
     return [...left, ...middle, ...right].map((part) => part.padStart(4, '0')).join(':');
+  }
+
+  /**
+   * Check if an IP address falls within a CIDR range using cached data
+   *
+   * @param ip - IP address to check
+   * @param cidr - CIDR notation (e.g., "192.168.1.0/24")
+   * @returns true if IP is in range
+   * @private
+   */
+  private isIpInCidrRangeCached(ip: string, cidr: string): boolean {
+    const cached = this.cidrCache.get(cidr);
+    if (!cached) {
+      // Fallback to non-cached version
+      return this.isIpInCidrRange(ip, cidr);
+    }
+
+    const { network, prefixLen } = cached;
+
+    // Determine IP version
+    const ipIsV4 = isIPv4(ip);
+    const networkIsV4 = isIPv4(network);
+
+    if (ipIsV4 !== networkIsV4) {
+      // IP version mismatch
+      return false;
+    }
+
+    if (ipIsV4) {
+      return this.isIPv4InCidr(ip, network, prefixLen);
+    } else {
+      return this.isIPv6InCidr(ip, network, prefixLen);
+    }
   }
 
   /**

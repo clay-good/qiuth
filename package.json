@@ -85,8 +85,5 @@
     "express": {
       "optional": true
     }
-  },
-  "dependencies": {
-    "qiuth": "^0.1.1"
   }
 }
