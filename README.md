@@ -34,7 +34,7 @@ curl -H "Authorization: Bearer sk_live_abc123def456" https://api.yourapp.com/dat
 
 **Qiuth adds multi-factor authentication to your API keys**, transforming them from bearer tokens (anyone with the key can use it) into **proof-of-possession tokens** (you need the key PLUS additional factors).
 
-### Three Layers of Defense
+### Multiple Layers of Defense
 
 1. **IP Allowlisting** - First line of defense
    - Verify requests come from authorized locations
@@ -46,10 +46,22 @@ curl -H "Authorization: Bearer sk_live_abc123def456" https://api.yourapp.com/dat
    - Tokens change every 30 seconds
    - Even if API key is leaked, attacker needs TOTP secret
 
-3. **Certificate Authentication** - Cryptographic proof
-   - Requires private key to sign each request
-   - Prevents replay attacks with timestamp validation
-   - Even if API key + TOTP are leaked, attacker needs private key
+3. **Request Signing** - Cryptographic proof (choose one):
+
+   **Certificate Authentication** (asymmetric)
+   - Requires RSA private key to sign each request
+   - Only public key stored on server
+   - Best for external clients or when key distribution is a concern
+
+   **HMAC Authentication** (symmetric)
+   - Uses shared secret for request signing
+   - Simpler setup, same security for internal services
+   - Best for trusted environments and service-to-service communication
+
+4. **Timestamp Validation** - Prevents replay attacks
+   - Signed requests include timestamp
+   - Server rejects stale requests (configurable window)
+   - Even captured requests cannot be replayed
 
 ### Real-World Impact
 
@@ -62,12 +74,70 @@ API_KEY=sk_live_abc123def456
 curl -H "X-API-Key: sk_live_abc123def456" https://api.yourapp.com/data
 # FAILED: 401 Unauthorized - IP not in allowlist
 
-# Attacker would need ALL THREE:
+# Attacker would need ALL of these:
 # 1. API key (leaked)
 # 2. TOTP secret (stored separately)
-# 3. Private key (never leaves secure environment)
+# 3. Signing key (private key OR HMAC secret)
 # = Virtually impossible to compromise
 ```
+
+---
+
+## Why Qiuth?
+
+### The Non-Human Identity (NHI) Security Gap
+
+We invest heavily in multi-factor authentication for human accounts. Password managers, authenticator apps, hardware keys - the security industry has made MFA standard for people.
+
+**But what about service accounts?**
+
+Service accounts, API clients, and machine-to-machine integrations typically authenticate with:
+- Static API keys that never rotate
+- OAuth client_id/client_secret pairs with no second factor
+- Long-lived tokens with no additional verification
+
+This creates a fundamental security gap: **non-human identities have weaker authentication than human identities**, despite often having broader access to sensitive systems.
+
+### The OAuth Client Secret Problem
+
+Many developers think "just use OAuth" solves API security. But OAuth client secrets have the same vulnerabilities as API keys:
+
+- **Client secrets are static** - They don't change unless manually rotated
+- **Client secrets are reusable** - Anyone with the secret can request tokens
+- **Client secrets can be intercepted** - MITM the initial token request and you have the secret
+- **Client secrets are essentially passwords** - With all the same risks of credential theft
+
+The JP Morgan Chase CISO's [open letter to third-party suppliers](https://www.jpmorganchase.com/about/technology/blog/open-letter-to-our-suppliers) highlighted these exact concerns about OAuth and current authentication standards for machine-to-machine communication.
+
+### Why IP Allowlisting Should Be Standard
+
+A simple question: **Why is it so difficult for SaaS apps to add IP allowlisting?**
+
+Consider this real-world scenario: An engineer accidentally commits a config file containing a root access key to a public repository. Within minutes, automated scanners find it. The key is compromised.
+
+This could have been a non-issue with a simple IAM policy:
+```
+Deny all access with this key if source IP is not in [VPN_STATIC_IP]
+```
+
+Even trivial IP validation - reading the X-Forwarded-For header before returning a response - would dramatically reduce the blast radius of leaked credentials. Yet most APIs don't offer this basic protection.
+
+Qiuth makes IP allowlisting a first-class feature, not an afterthought.
+
+### Qiuth's Approach: MFA for ALL Identities
+
+Qiuth applies the same security rigor to service accounts that we expect for human accounts:
+
+| Human Account | Service Account (with Qiuth) |
+|--------------|------------------------------|
+| Password | API Key |
+| IP-based access controls | IP Allowlisting (Layer 1) |
+| Authenticator app (TOTP) | TOTP for services (Layer 2) |
+| Hardware security key | Certificate signing (Layer 3) |
+
+The result: even if your API key leaks, an attacker needs to also compromise your TOTP secret AND your private key AND make requests from an allowed IP address.
+
+**That's defense in depth for machine identities.**
 
 ---
 
@@ -116,7 +186,18 @@ if (result.success) {
 
 **Note:** Use `.withCertificate(publicKey)` for maximum security. This requires clients to cryptographically sign each request with their private key, providing proof-of-possession that prevents unauthorized access even if API keys and TOTP secrets are compromised.
 
-### Express Middleware
+### Framework Middleware
+
+Qiuth provides middleware for popular Node.js frameworks:
+
+| Framework | Function | Runtime |
+|-----------|----------|---------|
+| Express | `createQiuthMiddleware` | Node.js |
+| Fastify | `qiuthFastifyPlugin` | Node.js |
+| Koa | `createQiuthKoaMiddleware` | Node.js |
+| Hono | `createQiuthHonoMiddleware` | Node.js, Cloudflare Workers, Deno, Bun |
+
+#### Express
 
 ```typescript
 import express from 'express';
@@ -125,17 +206,62 @@ import { createQiuthMiddleware, QiuthConfigBuilder } from 'qiuth';
 const app = express();
 
 const qiuthAuth = createQiuthMiddleware({
-  config: new QiuthConfigBuilder()
-    .withApiKey('your-api-key')
-    .withIpAllowlist(['0.0.0.0/0'])
-    .withTotp('your-totp-secret')
-    .build(),
+  configLookup: async (apiKey) => {
+    return await db.getApiKeyConfig(apiKey);
+  },
 });
 
 app.get('/api/protected', qiuthAuth, (req, res) => {
   res.json({ message: 'Access granted!' });
 });
 ```
+
+#### Fastify
+
+```typescript
+import fastify from 'fastify';
+import { qiuthFastifyPlugin } from 'qiuth';
+
+const app = fastify();
+
+app.register(qiuthFastifyPlugin, {
+  configLookup: async (apiKey) => await db.getApiKeyConfig(apiKey),
+});
+
+app.get('/protected', { preHandler: app.qiuthAuth }, async (request, reply) => {
+  return { authenticated: true };
+});
+```
+
+#### Koa
+
+```typescript
+import Koa from 'koa';
+import { createQiuthKoaMiddleware } from 'qiuth';
+
+const app = new Koa();
+
+const qiuthMiddleware = createQiuthKoaMiddleware({
+  configLookup: async (apiKey) => await db.getApiKeyConfig(apiKey),
+});
+
+app.use(qiuthMiddleware);
+```
+
+#### Hono (Edge-ready)
+
+```typescript
+import { Hono } from 'hono';
+import { createQiuthHonoMiddleware } from 'qiuth';
+
+const app = new Hono();
+
+app.use('/api/*', createQiuthHonoMiddleware({
+  configLookup: async (apiKey) => await db.getApiKeyConfig(apiKey),
+}));
+```
+
+[Full Middleware Documentation](./docs/middleware-integrations.md)
 
 ---
 

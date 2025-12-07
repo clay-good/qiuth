@@ -9,6 +9,7 @@
 
 import { TotpValidator } from '../validators/totp-validator';
 import { CertificateValidator } from '../validators/certificate-validator';
+import { HmacValidator } from '../validators/hmac-validator';
 
 /**
  * Options for QiuthClient
@@ -36,6 +37,12 @@ export interface QiuthClientOptions {
    * PEM-encoded RSA private key
    */
   privateKey?: string;
+
+  /**
+   * HMAC shared secret (if HMAC auth is enabled)
+   * Must be at least 32 characters
+   */
+  hmacSecret?: string;
 
   /**
    * Custom headers to include in all requests
@@ -126,9 +133,10 @@ export interface QiuthResponse<T = unknown> {
  * ```
  */
 export class QiuthClient {
-  private readonly options: Required<Omit<QiuthClientOptions, 'totpSecret' | 'privateKey'>> & {
+  private readonly options: Required<Omit<QiuthClientOptions, 'totpSecret' | 'privateKey' | 'hmacSecret'>> & {
     totpSecret?: string;
     privateKey?: string;
+    hmacSecret?: string;
   };
   private totpValidator?: TotpValidator;
 
@@ -142,6 +150,7 @@ export class QiuthClient {
       baseUrl: options.baseUrl.replace(/\/$/, ''), // Remove trailing slash
       totpSecret: options.totpSecret,
       privateKey: options.privateKey,
+      hmacSecret: options.hmacSecret,
       headers: options.headers || {},
       timeout: options.timeout ?? 30000,
       retries: options.retries ?? 3,
@@ -279,7 +288,7 @@ export class QiuthClient {
       headers['x-totp-token'] = this.totpValidator.generate();
     }
 
-    // Add signature if private key is available
+    // Add signature if private key is available (certificate auth)
     if (this.options.privateKey) {
       const timestamp = Date.now();
       const body = this.serializeBody(options.body);
@@ -292,6 +301,24 @@ export class QiuthClient {
       );
       headers['x-signature'] = signature;
       headers['x-timestamp'] = timestamp.toString();
+    }
+
+    // Add HMAC signature if HMAC secret is available
+    if (this.options.hmacSecret) {
+      const timestamp = Date.now();
+      const body = this.serializeBody(options.body);
+      const hmacSignature = HmacValidator.sign(
+        this.options.hmacSecret,
+        method,
+        url,
+        body,
+        timestamp
+      );
+      headers['x-hmac-signature'] = hmacSignature;
+      // Only set timestamp if not already set by certificate auth
+      if (!headers['x-timestamp']) {
+        headers['x-timestamp'] = timestamp.toString();
+      }
     }
 
     // Add content-type for requests with body

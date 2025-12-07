@@ -16,6 +16,8 @@ export enum SecurityLayer {
   TOTP_MFA = 'TOTP_MFA',
   /** Certificate-based authentication with request signing */
   CERTIFICATE = 'CERTIFICATE',
+  /** HMAC-based authentication with shared secret */
+  HMAC = 'HMAC',
 }
 
 /**
@@ -40,6 +42,10 @@ export enum ValidationErrorType {
   EXPIRED_TIMESTAMP = 'EXPIRED_TIMESTAMP',
   /** Request timestamp is in the future */
   FUTURE_TIMESTAMP = 'FUTURE_TIMESTAMP',
+  /** HMAC signature is missing when required */
+  MISSING_HMAC = 'MISSING_HMAC',
+  /** HMAC signature is invalid */
+  INVALID_HMAC = 'INVALID_HMAC',
   /** Configuration is invalid or incomplete */
   INVALID_CONFIGURATION = 'INVALID_CONFIGURATION',
   /** Internal error during validation */
@@ -111,6 +117,29 @@ export interface CertificateConfig {
 }
 
 /**
+ * Configuration for HMAC-based authentication layer
+ *
+ * HMAC provides a lighter-weight alternative to certificate authentication
+ * using shared secrets instead of public-key cryptography.
+ */
+export interface HmacConfig {
+  /** Whether HMAC authentication is enabled */
+  enabled: boolean;
+  /**
+   * Shared secret for HMAC computation
+   * Must be at least 32 characters for security
+   * Should be securely generated and stored
+   */
+  secret: string;
+  /**
+   * Maximum age of a signed request in seconds
+   * Prevents replay attacks by rejecting old signatures
+   * @default 300 (5 minutes)
+   */
+  maxAge?: number;
+}
+
+/**
  * Complete configuration for a single API key
  *
  * This represents all security settings for one API key.
@@ -137,6 +166,12 @@ export interface QiuthConfig {
    * When enabled, requests must be signed with the private key
    */
   certificate?: CertificateConfig;
+  /**
+   * HMAC-based authentication configuration
+   * When enabled, requests must include a valid HMAC signature
+   * Lighter-weight alternative to certificate authentication
+   */
+  hmac?: HmacConfig;
   /**
    * Optional metadata for this API key
    * Can be used for logging, monitoring, or application-specific purposes
@@ -167,10 +202,15 @@ export interface AuthenticationRequest {
    */
   totpToken?: string;
   /**
-   * Optional request signature
+   * Optional request signature (for certificate authentication)
    * Required if certificate authentication is enabled
    */
   signature?: string;
+  /**
+   * Optional HMAC signature (for HMAC authentication)
+   * Required if HMAC authentication is enabled
+   */
+  hmacSignature?: string;
   /**
    * HTTP method of the request (GET, POST, etc.)
    * Included in signature to prevent method tampering

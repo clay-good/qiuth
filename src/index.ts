@@ -16,12 +16,16 @@ export * from './types';
 export * from './validators/ip-validator';
 export * from './validators/totp-validator';
 export * from './validators/certificate-validator';
+export * from './validators/hmac-validator';
 
 // Core orchestration
 export * from './core/authenticator';
 
 // Middleware
 export * from './middleware/express';
+export * from './middleware/fastify';
+export * from './middleware/koa';
+export * from './middleware/hono';
 
 // Client library
 export * from './client/qiuth-client';

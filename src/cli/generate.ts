@@ -6,6 +6,7 @@
  * Command-line tool for generating Qiuth credentials:
  * - API keys
  * - TOTP secrets
+ * - HMAC shared secrets
  * - RSA key pairs
  *
  * @packageDocumentation
@@ -14,6 +15,7 @@
 import { generateApiKey, generateTotpSecret, generateKeyPair } from '../utils/crypto';
 import { QiuthAuthenticator } from '../core/authenticator';
 import { TotpValidator } from '../validators/totp-validator';
+import { HmacValidator } from '../validators/hmac-validator';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -31,6 +33,7 @@ Types:
   api-key       Generate a new API key
   totp          Generate a TOTP secret
   keypair       Generate an RSA key pair
+  hmac-secret   Generate an HMAC shared secret
   all           Generate all credentials
 
 Options:
@@ -47,6 +50,8 @@ Examples:
   qiuth generate api-key --length 64 --hash
   qiuth generate totp
   qiuth generate keypair --modulus 4096
+  qiuth generate hmac-secret
+  qiuth generate hmac-secret --length 64
   qiuth generate all --output ./credentials --format json
   `);
 }
@@ -77,7 +82,7 @@ function generateApiKeyCommand(args: string[]): void {
     if (hashedApiKey) {
       console.log(`Hashed:  ${hashedApiKey}`);
     }
-    console.log('\n⚠️  Store this key securely! It will not be shown again.');
+    console.log('\nWARNING: Store this key securely! It will not be shown again.');
   }
 }
 
@@ -143,13 +148,40 @@ function generateKeypairCommand(args: string[]): void {
       console.log(`Key Size:    ${modulusLength} bits`);
       console.log(`Public Key:  ${publicKeyPath}`);
       console.log(`Private Key: ${privateKeyPath}`);
-      console.log('\n⚠️  Keep the private key secure! Never commit it to version control.');
+      console.log('\nWARNING: Keep the private key secure! Never commit it to version control.');
     } catch (error) {
       console.error(
         `Error writing key files: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
       process.exit(1);
     }
+  }
+}
+
+/**
+ * Generate HMAC shared secret
+ */
+function generateHmacSecretCommand(args: string[]): void {
+  const lengthIndex = args.indexOf('--length');
+  const length = lengthIndex >= 0 ? parseInt(args[lengthIndex + 1] || '32', 10) : 32;
+  const format = getFormat(args);
+
+  // Ensure minimum length for security
+  const effectiveLength = Math.max(length, 32);
+
+  const secret = HmacValidator.generateSecret(effectiveLength);
+
+  if (format === 'json') {
+    console.log(JSON.stringify({ hmacSecret: secret, length: effectiveLength }, null, 2));
+  } else if (format === 'env') {
+    console.log(`QIUTH_HMAC_SECRET=${secret}`);
+  } else {
+    console.log('HMAC Secret Generated:');
+    console.log('======================');
+    console.log(`Secret: ${secret}`);
+    console.log(`Length: ${effectiveLength} bytes (${effectiveLength * 8} bits)`);
+    console.log('\nStore this secret securely on both client and server.');
+    console.log('Never expose it in client-side code or version control.');
   }
 }
 
@@ -163,6 +195,7 @@ function generateAllCommand(args: string[]): void {
   const apiKey = generateApiKey();
   const hashedApiKey = hash ? QiuthAuthenticator.hashApiKey(apiKey) : undefined;
   const totpSecret = generateTotpSecret();
+  const hmacSecret = HmacValidator.generateSecret();
   const { publicKey, privateKey } = generateKeyPair();
 
   if (format === 'json') {
@@ -172,6 +205,7 @@ function generateAllCommand(args: string[]): void {
           apiKey,
           hashedApiKey,
           totp: { secret: totpSecret },
+          hmac: { secret: hmacSecret },
           certificate: { publicKey, privateKey },
         },
         null,
@@ -185,6 +219,7 @@ function generateAllCommand(args: string[]): void {
       console.log(`QIUTH_HASHED_API_KEY=${hashedApiKey}`);
     }
     console.log(`QIUTH_TOTP_SECRET=${totpSecret}`);
+    console.log(`QIUTH_HMAC_SECRET=${hmacSecret}`);
     console.log(`QIUTH_CERTIFICATE_PUBLIC_KEY="${publicKey.replace(/\n/g, '\\n')}"`);
     console.log('# Store private key in a secure location');
   } else {
@@ -195,9 +230,10 @@ function generateAllCommand(args: string[]): void {
       console.log(`Hashed:  ${hashedApiKey}`);
     }
     console.log(`\nTOTP Secret: ${totpSecret}`);
+    console.log(`\nHMAC Secret: ${hmacSecret}`);
     console.log(`\nPublic Key:\n${publicKey}`);
     console.log(`Private Key:\n${privateKey}`);
-    console.log('\n⚠️  Store these credentials securely!');
+    console.log('\nStore these credentials securely!');
   }
 }
 
@@ -242,6 +278,9 @@ function main(): void {
           break;
         case 'keypair':
           generateKeypairCommand(subArgs);
+          break;
+        case 'hmac-secret':
+          generateHmacSecretCommand(subArgs);
           break;
         case 'all':
           generateAllCommand(subArgs);

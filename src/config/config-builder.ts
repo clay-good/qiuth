@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import { QiuthConfig, IpAllowlistConfig, TotpConfig, CertificateConfig } from '../types';
+import { QiuthConfig, IpAllowlistConfig, TotpConfig, CertificateConfig, HmacConfig } from '../types';
 import { QiuthAuthenticator } from '../core/authenticator';
 
 /**
@@ -115,6 +115,34 @@ export class QiuthConfigBuilder {
   }
 
   /**
+   * Enable HMAC-based authentication with shared secret
+   *
+   * HMAC provides a lighter-weight alternative to certificate authentication.
+   * Use for internal service-to-service communication where both sides
+   * can securely store a shared secret.
+   *
+   * @param secret - Shared secret (minimum 32 characters)
+   * @param maxAge - Maximum age of request in seconds (default: 300)
+   */
+  public withHmac(secret: string, maxAge = 300): this {
+    this.config.hmac = {
+      enabled: true,
+      secret,
+      maxAge,
+    };
+    return this;
+  }
+
+  /**
+   * Configure HMAC with full options
+   * @param config - HMAC configuration
+   */
+  public withHmacConfig(config: HmacConfig): this {
+    this.config.hmac = config;
+    return this;
+  }
+
+  /**
    * Disable IP allowlist
    */
   public withoutIpAllowlist(): this {
@@ -145,6 +173,16 @@ export class QiuthConfigBuilder {
   }
 
   /**
+   * Disable HMAC authentication
+   */
+  public withoutHmac(): this {
+    if (this.config.hmac) {
+      this.config.hmac.enabled = false;
+    }
+    return this;
+  }
+
+  /**
    * Build the configuration
    * @throws Error if required fields are missing
    */
@@ -158,6 +196,7 @@ export class QiuthConfigBuilder {
       ipAllowlist: this.config.ipAllowlist,
       totp: this.config.totp,
       certificate: this.config.certificate,
+      hmac: this.config.hmac,
     };
   }
 
@@ -206,6 +245,18 @@ export class QiuthConfigBuilder {
         throw new Error('publicKey is required when certificate authentication is enabled');
       }
       if (config.certificate.maxAge !== undefined && config.certificate.maxAge <= 0) {
+        throw new Error('maxAge must be positive');
+      }
+    }
+
+    if (config.hmac?.enabled) {
+      if (!config.hmac.secret) {
+        throw new Error('secret is required when HMAC authentication is enabled');
+      }
+      if (config.hmac.secret.length < 32) {
+        throw new Error('HMAC secret must be at least 32 characters for security');
+      }
+      if (config.hmac.maxAge !== undefined && config.hmac.maxAge <= 0) {
         throw new Error('maxAge must be positive');
       }
     }

@@ -132,6 +132,55 @@ const result = await authenticator.authenticate({
 - Private key never leaves the client's secure environment
 - Cryptographically verifiable proof-of-possession
 
+### 5. Add HMAC-based Authentication (Lightweight Alternative)
+
+**Use `.withHmac()` when you need request signing without the overhead of RSA certificates.** HMAC uses a shared secret for symmetric signing - simpler to set up but requires both client and server to securely store the secret.
+
+```typescript
+import { HmacValidator } from 'qiuth';
+
+// Generate shared secret (do this once, distribute securely)
+const hmacSecret = HmacValidator.generateSecret(); // 64 hex chars (256 bits)
+
+// Server configuration
+const config = new QiuthConfigBuilder()
+  .withApiKey('your-api-key-here')
+  .withIpAllowlist(['192.168.1.0/24'])
+  .withHmac(hmacSecret, 300) // maxAge=300 seconds
+  .build();
+
+// Client must sign each request
+const timestamp = Date.now();
+const hmacSignature = HmacValidator.sign(
+  hmacSecret,
+  'POST',
+  'https://api.example.com/resource',
+  JSON.stringify({ data: 'example' }),
+  timestamp
+);
+
+// Authenticate with HMAC signature
+const result = await authenticator.authenticate({
+  apiKey: 'user-provided-api-key',
+  clientIp: '192.168.1.100',
+  method: 'POST',
+  url: 'https://api.example.com/resource',
+  body: JSON.stringify({ data: 'example' }),
+  timestamp: timestamp.toString(),
+  hmacSignature,
+}, config);
+```
+
+**When to use HMAC vs Certificates:**
+
+| Feature | HMAC | Certificates |
+|---------|------|--------------|
+| Key type | Symmetric (shared secret) | Asymmetric (public/private) |
+| Setup complexity | Simple | More complex |
+| Key distribution | Must share secret securely | Only share public key |
+| Non-repudiation | No | Yes |
+| Best for | Internal services, trusted environments | External clients, untrusted networks |
+
 ## Express Middleware
 
 Qiuth provides Express middleware for easy integration:
@@ -177,7 +226,8 @@ const client = new QiuthClient({
   baseUrl: 'https://api.example.com',
   apiKey: 'your-api-key',
   totpSecret: 'your-totp-secret', // optional
-  privateKey: 'your-private-key', // optional
+  hmacSecret: 'your-hmac-secret', // optional - use this OR privateKey
+  privateKey: 'your-private-key', // optional - use this OR hmacSecret
 });
 
 // Make authenticated requests
@@ -202,8 +252,11 @@ npx qiuth generate api-key
 # Generate TOTP secret
 npx qiuth generate totp
 
+# Generate HMAC shared secret
+npx qiuth generate hmac-secret
+
 # Generate RSA key pair
-npx qiuth generate keypair --bits 2048
+npx qiuth generate keypair --modulus 2048
 
 # Generate all credentials at once
 npx qiuth generate all
@@ -236,16 +289,25 @@ const authenticator = new QiuthAuthenticator();
 
 ## Common Patterns
 
-### All Three Layers
+### All Layers for Maximum Security
 
-For maximum security, use all three authentication layers:
+For maximum security, combine multiple authentication layers:
 
 ```typescript
-const config = new QiuthConfigBuilder()
+// Option 1: With Certificate signing (asymmetric)
+const configWithCert = new QiuthConfigBuilder()
   .withApiKey('your-api-key')
   .withIpAllowlist(['192.168.1.0/24'])
   .withTotp(totpSecret)
   .withCertificate(publicKey)
+  .build();
+
+// Option 2: With HMAC signing (symmetric, simpler)
+const configWithHmac = new QiuthConfigBuilder()
+  .withApiKey('your-api-key')
+  .withIpAllowlist(['192.168.1.0/24'])
+  .withTotp(totpSecret)
+  .withHmac(hmacSecret)
   .build();
 ```
 

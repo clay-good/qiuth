@@ -164,6 +164,7 @@ export function createQiuthMiddleware(options: QiuthMiddlewareOptions) {
         headers: req.headers as Record<string, string | string[] | undefined>,
         totpToken: extractTotpToken(req),
         signature: extractSignature(req),
+        hmacSignature: extractHmacSignature(req),
         timestamp: extractTimestamp(req),
       };
 
@@ -283,6 +284,17 @@ function extractTotpToken(req: Request): string | undefined {
  */
 function extractSignature(req: Request): string | undefined {
   const header = req.headers['x-signature'];
+  if (header) {
+    return Array.isArray(header) ? header[0] : header;
+  }
+  return undefined;
+}
+
+/**
+ * Extract HMAC signature from request
+ */
+function extractHmacSignature(req: Request): string | undefined {
+  const header = req.headers['x-hmac-signature'];
   if (header) {
     return Array.isArray(header) ? header[0] : header;
   }

@@ -19,6 +19,7 @@ import {
 import { IpValidator } from '../validators/ip-validator';
 import { TotpValidator } from '../validators/totp-validator';
 import { CertificateValidator } from '../validators/certificate-validator';
+import { HmacValidator } from '../validators/hmac-validator';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 /**
@@ -49,6 +50,7 @@ export class QiuthAuthenticator {
    * 1. IP Allowlist (if enabled)
    * 2. TOTP MFA (if enabled)
    * 3. Certificate Authentication (if enabled)
+   * 4. HMAC Authentication (if enabled)
    *
    * Uses fail-fast approach - stops at first failure.
    *
@@ -106,6 +108,16 @@ export class QiuthAuthenticator {
     // Run certificate validation
     if (config.certificate?.enabled) {
       const result = this.validateCertificate(request, config, correlationId);
+      layerResults.push(result);
+      if (!result.passed) {
+        errors.push(result.error!);
+        return this.createResult(false, errors, layerResults, startTime, correlationId);
+      }
+    }
+
+    // Run HMAC validation
+    if (config.hmac?.enabled) {
+      const result = this.validateHmac(request, config, correlationId);
       layerResults.push(result);
       if (!result.passed) {
         errors.push(result.error!);
@@ -300,6 +312,67 @@ export class QiuthAuthenticator {
         layer: SecurityLayer.CERTIFICATE,
         passed: false,
         error: `Certificate validation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        errorType: ValidationErrorType.INTERNAL_ERROR,
+      };
+    }
+  }
+
+  /**
+   * Validate HMAC layer
+   */
+  private validateHmac(
+    request: AuthenticationRequest,
+    config: QiuthConfig,
+    correlationId: string
+  ): LayerValidationResult {
+    this.log(`[${correlationId}] Validating HMAC`);
+
+    if (!request.hmacSignature) {
+      return {
+        layer: SecurityLayer.HMAC,
+        passed: false,
+        error: 'HMAC signature is required but not provided',
+        errorType: ValidationErrorType.MISSING_HMAC,
+      };
+    }
+
+    if (!request.timestamp) {
+      return {
+        layer: SecurityLayer.HMAC,
+        passed: false,
+        error: 'Request timestamp is required for HMAC verification',
+        errorType: ValidationErrorType.EXPIRED_TIMESTAMP,
+      };
+    }
+
+    try {
+      const validator = new HmacValidator(config.hmac!);
+      const passed = validator.verify(
+        request.hmacSignature,
+        request.method,
+        request.url,
+        request.body,
+        request.timestamp
+      );
+
+      if (!passed) {
+        return {
+          layer: SecurityLayer.HMAC,
+          passed: false,
+          error: 'Invalid HMAC signature or expired timestamp',
+          errorType: ValidationErrorType.INVALID_HMAC,
+        };
+      }
+
+      return {
+        layer: SecurityLayer.HMAC,
+        passed: true,
+      };
+    } catch (error) {
+      return {
+        layer: SecurityLayer.HMAC,
+        passed: false,
+        error: `HMAC validation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
         errorType: ValidationErrorType.INTERNAL_ERROR,
       };
     }

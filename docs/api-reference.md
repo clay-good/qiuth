@@ -12,6 +12,7 @@ Complete API documentation for Qiuth v0.1.0.
   - [IpValidator](#ipvalidator)
   - [TotpValidator](#totpvalidator)
   - [CertificateValidator](#certificatevalidator)
+  - [HmacValidator](#hmacvalidator)
 - [Middleware](#middleware)
   - [createQiuthMiddleware](#createqiuthmiddleware)
 - [Credential Management](#credential-management)
@@ -72,6 +73,7 @@ async authenticate(
   - `clientIp: string` - Client IP address
   - `totpToken?: string` - TOTP token (if TOTP enabled)
   - `signature?: string` - Request signature (if certificate auth enabled)
+  - `hmacSignature?: string` - HMAC signature (if HMAC auth enabled)
   - `timestamp?: string` - Request timestamp (for signature verification)
   - `method: string` - HTTP method (GET, POST, etc.)
   - `url: string` - Request URL
@@ -83,6 +85,7 @@ async authenticate(
   - `ipAllowlist?: IpAllowlistConfig` - IP allowlist configuration
   - `totp?: TotpConfig` - TOTP configuration
   - `certificate?: CertificateConfig` - Certificate configuration
+  - `hmac?: HmacConfig` - HMAC configuration
 
 **Returns:** `Promise<ValidationResult>`
 - `success: boolean` - Whether authentication succeeded
@@ -103,9 +106,9 @@ const result = await authenticator.authenticate({
 }, config);
 
 if (result.success) {
-  console.log('✅ Authenticated!');
+  console.log('Authenticated!');
 } else {
-  console.error('❌ Failed:', result.errors);
+  console.error('Failed:', result.errors);
 }
 ```
 
@@ -280,6 +283,39 @@ Disable certificate authentication.
 withoutCertificate(): this
 ```
 
+##### `withHmac(secret, maxAge?)`
+
+Enable HMAC-based authentication.
+
+```typescript
+withHmac(
+  secret: string,
+  maxAge?: number
+): this
+```
+
+**Parameters:**
+- `secret: string` - Shared secret (minimum 32 characters)
+- `maxAge?: number` - Maximum age of signatures in seconds (default: `300`)
+
+**Returns:** `this` (for chaining)
+
+**Example:**
+```typescript
+builder.withHmac(
+  'your-32-character-or-longer-secret-here',
+  300
+);
+```
+
+##### `withoutHmac()`
+
+Disable HMAC authentication.
+
+```typescript
+withoutHmac(): this
+```
+
 ##### `build()`
 
 Build the configuration.
@@ -318,6 +354,7 @@ constructor(options: QiuthClientOptions)
   - `apiKey: string` - API key for authentication
   - `baseUrl: string` - Base URL for API requests
   - `totpSecret?: string` - TOTP secret (if TOTP enabled)
+  - `hmacSecret?: string` - Shared secret for HMAC signing (if HMAC auth enabled)
   - `privateKey?: string` - PEM-encoded private key (if certificate auth enabled)
   - `timeout?: number` - Request timeout in ms (default: `30000`)
   - `retries?: number` - Number of retries (default: `3`)
@@ -326,11 +363,22 @@ constructor(options: QiuthClientOptions)
 
 **Example:**
 ```typescript
-const client = new QiuthClient({
+// With certificate auth
+const clientWithCert = new QiuthClient({
   apiKey: 'my-api-key',
   baseUrl: 'https://api.example.com',
   totpSecret: 'JBSWY3DPEHPK3PXP',
   privateKey: '-----BEGIN PRIVATE KEY-----\n...',
+  timeout: 30000,
+  retries: 3,
+});
+
+// With HMAC auth (simpler alternative)
+const clientWithHmac = new QiuthClient({
+  apiKey: 'my-api-key',
+  baseUrl: 'https://api.example.com',
+  totpSecret: 'JBSWY3DPEHPK3PXP',
+  hmacSecret: 'your-32-character-or-longer-secret',
   timeout: 30000,
   retries: 3,
 });
@@ -632,6 +680,142 @@ const signature = CertificateValidator.sign(
   Date.now()
 );
 ```
+
+---
+
+### HmacValidator
+
+Validates request signatures using HMAC-SHA256 with a shared secret. A lighter-weight alternative to certificate-based authentication.
+
+#### Constructor
+
+```typescript
+constructor(config: HmacConfig)
+```
+
+**Parameters:**
+- `config: HmacConfig`
+  - `enabled: boolean` - Must be `true`
+  - `secret: string` - Shared secret (minimum 32 characters)
+  - `maxAge?: number` - Max signature age in seconds (default: `300`)
+
+**Throws:** `Error` if config is invalid or secret is too short
+
+#### Methods
+
+##### `verify(signature, method, url, body, timestamp)`
+
+Verify an HMAC signature.
+
+```typescript
+verify(
+  signature: string,
+  method: string,
+  url: string,
+  body?: string | Buffer,
+  timestamp?: string | number
+): boolean
+```
+
+**Parameters:**
+- `signature: string` - Hex-encoded HMAC signature
+- `method: string` - HTTP method (GET, POST, etc.)
+- `url: string` - Request URL
+- `body?: string | Buffer` - Request body
+- `timestamp?: string | number` - Unix timestamp in ms or ISO 8601 string
+
+**Returns:** `boolean` - `true` if valid, `false` otherwise
+
+##### `sign(secret, method, url, body, timestamp)` (static)
+
+Sign a request.
+
+```typescript
+static sign(
+  secret: string,
+  method: string,
+  url: string,
+  body?: string | Buffer,
+  timestamp?: number
+): string
+```
+
+**Parameters:**
+- `secret: string` - Shared secret
+- `method: string` - HTTP method
+- `url: string` - Request URL
+- `body?: string | Buffer` - Request body
+- `timestamp?: number` - Unix timestamp in ms (defaults to current time)
+
+**Returns:** `string` - Hex-encoded HMAC signature
+
+**Example:**
+```typescript
+import { HmacValidator } from 'qiuth';
+
+// Generate a secret
+const secret = HmacValidator.generateSecret();
+
+// Sign a request
+const timestamp = Date.now();
+const signature = HmacValidator.sign(
+  secret,
+  'POST',
+  'https://api.example.com/users',
+  JSON.stringify({ name: 'Alice' }),
+  timestamp
+);
+
+// Verify on server
+const validator = new HmacValidator({
+  enabled: true,
+  secret: secret,
+});
+
+const isValid = validator.verify(
+  signature,
+  'POST',
+  'https://api.example.com/users',
+  JSON.stringify({ name: 'Alice' }),
+  timestamp
+);
+```
+
+##### `generateSecret(length?)` (static)
+
+Generate a cryptographically secure shared secret.
+
+```typescript
+static generateSecret(length?: number): string
+```
+
+**Parameters:**
+- `length?: number` - Length in bytes (default: `32`)
+
+**Returns:** `string` - Hex-encoded secret (64 characters for 32 bytes)
+
+##### `getMaxAge()`
+
+Get the maximum signature age.
+
+```typescript
+getMaxAge(): number
+```
+
+**Returns:** `number` - Max age in seconds
+
+##### `isTimestampAcceptable(timestamp)`
+
+Check if a timestamp is within the acceptable range.
+
+```typescript
+isTimestampAcceptable(timestamp: string | number): boolean
+```
+
+**Parameters:**
+- `timestamp: string | number` - Timestamp to check
+
+**Returns:** `boolean` - `true` if acceptable
 
 ---
 
