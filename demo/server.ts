@@ -52,6 +52,7 @@ const configs = {
   withIp: new QiuthConfigBuilder()
     .withApiKey(apiKey)
     .withIpAllowlist(['127.0.0.1', '::1', '::ffff:127.0.0.1']) // localhost
+    //.withIpAllowlist(['192.168.90.1']) 
     .build(),
   
   // Level 3: API Key + IP + TOTP

@@ -58,6 +58,7 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
     "type-check": "tsc --noEmit",
     "demo": "tsx demo/server.ts",
+    "demo:watch": "tsx demo/dev-run.ts",
     "prepublishOnly": "npm run type-check && npm run test && npm run build",
     "clean": "rm -rf dist coverage"
   },

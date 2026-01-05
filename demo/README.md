@@ -94,6 +94,15 @@ curl -H "X-API-Key: YOUR_API_KEY" \
    curl http://localhost:3000
    ```
 
+4. **Automatic Restart Upon Change Available**
+
+   Run the following if you'd like to change IP allowlists etc. on the fly without having to manually restart the server. Be sure to reload `http://localhost:3000`
+   to get the most up to date API key or grab the new API key from your terminal output. 
+
+   ```bash
+   npm run demo:watch
+   ```
+
 ### Test Failure Scenarios
 
 1. **Wrong API Key**
