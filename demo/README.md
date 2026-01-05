@@ -312,12 +312,12 @@ Possible causes:
 **"IP not allowed"**
 
 Possible causes:
-1. **Not calling from localhost**: The demo only allows localhost
+1. **Not calling from localhost**: The demo only allows localhost or other IPs added in `demo/config.ts`
 2. **IPv4 vs IPv6**: Curl might use IPv6 (::1) or IPv4 (127.0.0.1)
 
 **Solution**:
-- The demo allows both: `127.0.0.1`, `::1`, and `::ffff:127.0.0.1`
-- If testing remotely, update the IP allowlist in `demo/server.ts`
+- The demo allows the following by default: `127.0.0.1`, `::1`, and `::ffff:127.0.0.1`
+- If testing remotely, update the IP allowlist in `demo/config.ts`
 
 ## 📈 Performance
 
@@ -329,12 +329,12 @@ Watch the server logs to see authentication speed:
 
 ## 🛠️ Customization
 
-Edit `demo/server.ts` to:
-- Change IP allowlist ranges
-- Adjust TOTP time windows
-- Modify certificate key sizes
-- Add custom endpoints
-- Test different scenarios
+Edit `demo/config.ts` to:
+- Change IP allowlist ranges (see `IP_ALLOWLIST`)
+- Adjust TOTP time windows (`TOTP.timeStep`, `TOTP.window`)
+- Modify certificate key sizes and signature max age (`CERT_OPTIONS`)
+- Add custom endpoints or import handlers into `demo/server.ts`
+- Test different scenarios (use `npm run demo:watch` to auto-restart)
 
 ## 🎓 Learning Path
 
@@ -344,6 +344,7 @@ Edit `demo/server.ts` to:
 4. **Maximum Security**: Test Level 4 (all three layers)
 5. **Test Failures**: Try wrong credentials to see error handling
 6. **Explore Code**: Read `demo/server.ts` to see implementation
+7. **Customize Options**: Modify values in `demo/config.ts` to try out different behavior
 
 ## 🚀 Next Steps
 
