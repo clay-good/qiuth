@@ -19,15 +19,14 @@ import {
   generateKeyPair,
   TotpValidator,
   CertificateValidator
-} from '../src/index';
-
+} from '../src/index';import { CERT_OPTIONS, IP_ALLOWLIST, TOTP } from './config';
 const app = express();
 app.use(express.json());
 
 // Generate demo credentials
 const apiKey = generateApiKey();
 const totpSecret = generateTotpSecret();
-const { publicKey, privateKey } = generateKeyPair({ modulusLength: 2048 });
+const { publicKey, privateKey } = generateKeyPair({ modulusLength: CERT_OPTIONS.modulusLength });
 
 console.log('\n' + '='.repeat(80));
 console.log('🔐 QIUTH INTERACTIVE DEMO - Multi-Factor Authentication for API Keys');
@@ -51,22 +50,22 @@ const configs = {
   // Level 2: API Key + IP Allowlist
   withIp: new QiuthConfigBuilder()
     .withApiKey(apiKey)
-    .withIpAllowlist(['127.0.0.1', '::1', '::ffff:127.0.0.1']) // localhost
+    .withIpAllowlist(IP_ALLOWLIST) // localhost
     .build(),
   
   // Level 3: API Key + IP + TOTP
   withTotp: new QiuthConfigBuilder()
     .withApiKey(apiKey)
-    .withIpAllowlist(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
-    .withTotp(totpSecret, 30, 1)
+    .withIpAllowlist(IP_ALLOWLIST)
+    .withTotp(totpSecret, TOTP.timeStep, TOTP.window)
     .build(),
   
   // Level 4: All three layers (Maximum Security)
   full: new QiuthConfigBuilder()
     .withApiKey(apiKey)
-    .withIpAllowlist(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
-    .withTotp(totpSecret, 30, 1)
-    .withCertificate(publicKey, 300)
+    .withIpAllowlist(IP_ALLOWLIST)
+    .withTotp(totpSecret, TOTP.timeStep, TOTP.window)
+    .withCertificate(publicKey, CERT_OPTIONS.maxAge)
     .build(),
 };
 
